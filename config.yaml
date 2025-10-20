@@ -1,0 +1,62 @@
+# إعدادات التدريب لنموذج YOLOv5 للكشف ثلاثي الأبعاد
+
+# البيانات
+data_dir: "Data"
+img_size: 640
+batch_size: 8
+num_workers: 4
+
+# التدريب
+epochs: 100
+learning_rate: 0.001
+weight_decay: 0.0005
+grad_clip: 10.0
+
+# الحفظ والتسجيل
+log_dir: "runs/3d_detection"
+checkpoint_dir: "checkpoints"
+output_dir: "outputs"
+save_interval: 10
+log_interval: 50
+
+# النموذج
+pretrained: false
+nc: 9  # عدد الفئات في KITTI
+
+# الفئات
+classes:
+  - Car
+  - Van
+  - Truck
+  - Pedestrian
+  - Person_sitting
+  - Cyclist
+  - Tram
+  - Misc
+  - DontCare
+
+# Anchors محسنة للكشف ثلاثي الأبعاد
+anchors:
+  - [10, 13, 16, 30, 33, 23]  # P3/8
+  - [30, 61, 62, 45, 59, 119]  # P4/16
+  - [116, 90, 156, 198, 373, 326]  # P5/32
+
+# معايير التقييم
+eval:
+  conf_threshold: 0.5
+  iou_threshold: 0.5
+  max_detections: 100
+
+# تحسينات إضافية
+augmentation:
+  horizontal_flip: 0.5
+  brightness_contrast: 0.3
+  hue_saturation: 0.3
+  gauss_noise: 0.2
+  blur: 0.2
+
+# إعدادات الجهاز
+device: "auto"  # auto, cuda, cpu
+mixed_precision: true
+compile_model: false
+
