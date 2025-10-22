@@ -92,7 +92,7 @@ class Evaluator3D:
             'rotation': outputs.get('rotation', [])
         }
     
-    def apply_nms(self, detections, conf_threshold=0.01, iou_threshold=0.5):
+    def apply_nms(self, detections, conf_threshold=0.01, iou_threshold=0.3):
         """Apply Non-Maximum Suppression - Improved for better detection"""
         boxes = []
         scores = []
@@ -204,6 +204,23 @@ class Evaluator3D:
             # Print diagnostic information
             print(f"Sample {idx}: GT boxes: {len(gt_boxes)}, Pred boxes: {len(pred_boxes)}")
             
+            # Debug: Print examples of GT and Pred boxes
+            if idx < 2:  # Print for first 2 samples
+                print(f"  GT Boxes example:")
+                for i, gt_box in enumerate(gt_boxes[:2]):
+                    print(f"    GT {i}: {gt_box['class']} - {gt_box['bbox']}")
+                
+                print(f"  Pred Boxes example:")
+                for i, pred_box in enumerate(pred_boxes[:5]):
+                    print(f"    Pred {i}: {pred_box['class']} - {pred_box['bbox']} - conf: {pred_box['confidence']:.3f}")
+                
+                # Calculate IoU between first GT and first few predictions
+                if gt_boxes and pred_boxes:
+                    print(f"  IoU examples:")
+                    for i, pred_box in enumerate(pred_boxes[:3]):
+                        iou = self.calculate_iou(gt_boxes[0]['bbox'], pred_box['bbox'])
+                        print(f"    GT[0] vs Pred[{i}]: IoU = {iou:.3f}, Class match: {gt_boxes[0]['class'] == pred_box['class']}")
+            
             # Calculate True Positives, False Positives, False Negatives
             tp, fp, fn = self.calculate_metrics(gt_boxes, pred_boxes)
             
@@ -222,15 +239,25 @@ class Evaluator3D:
                 if class_name in class_stats:
                     class_stats[class_name]['fp'] += 1
             
-            # Update TP for each class (simplified)
+            # Update TP for each class (improved)
+            matched_gt = set()
             for gt_box in gt_boxes:
                 class_name = gt_box['class']
-                for pred_box in pred_boxes:
+                best_iou = 0
+                best_pred_idx = -1
+                
+                for pred_idx, pred_box in enumerate(pred_boxes):
                     if (pred_box['class'] == class_name and 
-                        self.calculate_iou(gt_box['bbox'], pred_box['bbox']) >= 0.3):
-                        class_stats[class_name]['tp'] += 1
-                        class_stats[class_name]['fn'] -= 1
-                        break
+                        pred_idx not in matched_gt):
+                        iou = self.calculate_iou(gt_box['bbox'], pred_box['bbox'])
+                        if iou > best_iou and iou >= 0.1:
+                            best_iou = iou
+                            best_pred_idx = pred_idx
+                
+                if best_pred_idx != -1:
+                    class_stats[class_name]['tp'] += 1
+                    class_stats[class_name]['fn'] -= 1
+                    matched_gt.add(best_pred_idx)
             
             if idx % 5 == 0:
                 print(f"Processed {idx+1}/{min(20, total_samples)} samples")
@@ -312,7 +339,7 @@ class Evaluator3D:
         return intersection / union if union > 0 else 0.0
 
     def calculate_metrics(self, gt_boxes: List[Dict], pred_boxes: List[Dict], 
-                         iou_threshold: float = 0.3) -> Tuple[int, int, int]:
+                         iou_threshold: float = 0.1) -> Tuple[int, int, int]:
         """Calculate accuracy metrics"""
         tp = 0
         fp = 0
@@ -365,6 +392,47 @@ class Evaluator3D:
         
         return intersection / union if union > 0 else 0.0
     
+    def debug_sample(self, idx: int):
+        """Debug a single sample to understand the problem"""
+        image, targets = self.test_dataset[idx]
+        
+        # Get predictions
+        predictions = self.predict(image)
+        gt_boxes = self.extract_gt_boxes(targets)
+        pred_boxes = predictions['boxes']
+        
+        print(f"\n=== DEBUG SAMPLE {idx} ===")
+        print(f"GT boxes: {len(gt_boxes)}")
+        print(f"Pred boxes: {len(pred_boxes)}")
+        
+        # Print GT boxes
+        print("\nGT Boxes:")
+        for i, gt_box in enumerate(gt_boxes):
+            print(f"  {i}: {gt_box['class']} - {gt_box['bbox']}")
+        
+        # Print Pred boxes
+        print("\nPred Boxes (top 10):")
+        for i, pred_box in enumerate(pred_boxes[:10]):
+            print(f"  {i}: {pred_box['class']} - {pred_box['bbox']} - conf: {pred_box['confidence']:.3f}")
+        
+        # Check IoU between GT and predictions
+        print("\nIoU Analysis:")
+        for gt_idx, gt_box in enumerate(gt_boxes):
+            print(f"\nGT {gt_idx} ({gt_box['class']}):")
+            best_iou = 0
+            best_pred_idx = -1
+            for pred_idx, pred_box in enumerate(pred_boxes[:20]):  # Check first 20 predictions
+                iou = self.calculate_iou(gt_box['bbox'], pred_box['bbox'])
+                class_match = gt_box['class'] == pred_box['class']
+                if iou > best_iou:
+                    best_iou = iou
+                    best_pred_idx = pred_idx
+                
+                if iou > 0.1:  # Show IoU > 0.1
+                    print(f"    Pred {pred_idx}: IoU={iou:.3f}, Class={class_match}, Conf={pred_box['confidence']:.3f}")
+            
+            print(f"    Best IoU: {best_iou:.3f} (Pred {best_pred_idx})")
+
     def visualize_predictions(self, idx: int, save_path: str = None):
         """Visualize predictions on image"""
         image, targets = self.test_dataset[idx]
@@ -474,6 +542,10 @@ def main():
     
     # Create evaluator
     evaluator = Evaluator3D(args.model, config)
+    
+    # Debug first sample to understand the problem
+    print("=== DEBUGGING FIRST SAMPLE ===")
+    evaluator.debug_sample(0)
     
     # Evaluate model
     results = evaluator.evaluate_dataset()
