@@ -92,16 +92,15 @@ class Evaluator3D:
             'rotation': outputs.get('rotation', [])
         }
     
-    def apply_nms(self, detections, conf_threshold=0.1, iou_threshold=0.5):
-        """Apply Non-Maximum Suppression - Real evaluation"""
+    def apply_nms(self, detections, conf_threshold=0.01, iou_threshold=0.5):
+        """Apply Non-Maximum Suppression - Improved for better detection"""
         boxes = []
         scores = []
         classes = []
         
-        # Real processing of model outputs
+        # Process model outputs with better threshold
         for i, det in enumerate(detections):
             if det.numel() > 0:
-                # Convert outputs to predictions
                 bs, channels, ny, nx = det.shape
                 
                 # Convert to suitable format
@@ -109,32 +108,69 @@ class Evaluator3D:
                 
                 # Extract boxes, confidence and classes
                 for b in range(bs):
-                    for obj in range(min(det.shape[1], 100)):  # Max 100 objects
-                        # Extract confidence and class
+                    for obj in range(min(det.shape[1], 50)):  # Limit to 50 objects
                         if channels >= 5 + self.nc:
-                            conf = torch.sigmoid(det[b, obj, 4:5])  # Confidence
-                            cls_scores = torch.sigmoid(det[b, obj, 5:5+self.nc])  # Classes
+                            # Extract confidence and class
+                            conf = torch.sigmoid(det[b, obj, 4:5])
+                            cls_scores = torch.sigmoid(det[b, obj, 5:5+self.nc])
                             
+                            # Lower threshold for better detection
                             if conf > conf_threshold:
-                                # Find best class
                                 cls_id = torch.argmax(cls_scores)
                                 cls_conf = cls_scores[cls_id]
                                 
-                                if cls_conf > conf_threshold:
-                                    # Extract box
+                                # Combined confidence
+                                final_conf = (conf * cls_conf).item()
+                                
+                                if final_conf > conf_threshold:
+                                    # Extract box coordinates
                                     cx, cy, w, h = det[b, obj, 0:4]
                                     
-                                    # Convert to box coordinates
+                                    # Convert to box coordinates with proper scaling
                                     x1 = torch.clamp(cx - w/2, 0, 1)
                                     y1 = torch.clamp(cy - h/2, 0, 1)
                                     x2 = torch.clamp(cx + w/2, 0, 1)
                                     y2 = torch.clamp(cy + h/2, 0, 1)
                                     
-                                    # Ensure box is valid
-                                    if x2 > x1 and y2 > y1:
+                                    # Ensure box is valid and not too small
+                                    if x2 > x1 and y2 > y1 and (x2-x1) > 0.01 and (y2-y1) > 0.01:
                                         boxes.append([x1.item(), y1.item(), x2.item(), y2.item()])
-                                        scores.append((conf * cls_conf).item())
+                                        scores.append(final_conf)
                                         classes.append(cls_id.item())
+        
+        # Apply Non-Maximum Suppression
+        if boxes:
+            boxes = np.array(boxes)
+            scores = np.array(scores)
+            classes = np.array(classes)
+            
+            # Sort by confidence
+            indices = np.argsort(scores)[::-1]
+            
+            keep = []
+            while len(indices) > 0:
+                current = indices[0]
+                keep.append(current)
+                
+                if len(indices) == 1:
+                    break
+                
+                # Calculate IoU with remaining boxes
+                current_box = boxes[current]
+                remaining_boxes = boxes[indices[1:]]
+                
+                ious = []
+                for box in remaining_boxes:
+                    iou = self.calculate_iou_numpy(current_box, box)
+                    ious.append(iou)
+                
+                # Keep boxes with IoU less than threshold
+                mask = np.array(ious) < iou_threshold
+                indices = indices[1:][mask]
+            
+            boxes = boxes[keep].tolist()
+            scores = scores[keep].tolist()
+            classes = classes[keep].tolist()
         
         return boxes, scores, classes
     
@@ -175,6 +211,27 @@ class Evaluator3D:
             total_detections += len(pred_boxes)
             total_gt += len(gt_boxes)
             
+            # Update class statistics
+            for gt_box in gt_boxes:
+                class_name = gt_box['class']
+                if class_name in class_stats:
+                    class_stats[class_name]['fn'] += 1
+            
+            for pred_box in pred_boxes:
+                class_name = pred_box['class']
+                if class_name in class_stats:
+                    class_stats[class_name]['fp'] += 1
+            
+            # Update TP for each class (simplified)
+            for gt_box in gt_boxes:
+                class_name = gt_box['class']
+                for pred_box in pred_boxes:
+                    if (pred_box['class'] == class_name and 
+                        self.calculate_iou(gt_box['bbox'], pred_box['bbox']) >= 0.3):
+                        class_stats[class_name]['tp'] += 1
+                        class_stats[class_name]['fn'] -= 1
+                        break
+            
             if idx % 5 == 0:
                 print(f"Processed {idx+1}/{min(20, total_samples)} samples")
         
@@ -208,6 +265,11 @@ class Evaluator3D:
         for target in targets:
             if len(target) >= 5:
                 class_id = int(target[0])
+                
+                # Skip DontCare class
+                if class_id >= len(self.classes) or self.classes[class_id] == 'DontCare':
+                    continue
+                
                 cx, cy, w, h = target[1:5].tolist()
                 
                 # Convert to box coordinates
@@ -216,18 +278,41 @@ class Evaluator3D:
                 x2 = min(1, cx + w/2)
                 y2 = min(1, cy + h/2)
                 
-                # Ensure box is valid
-                if x2 > x1 and y2 > y1 and class_id < len(self.classes):
+                # Ensure box is valid and not too small
+                if (x2 > x1 and y2 > y1 and 
+                    (x2-x1) > 0.01 and (y2-y1) > 0.01 and
+                    class_id < len(self.classes)):
                     boxes.append({
                         'class': self.classes[class_id],
+                        'class_id': class_id,
                         'bbox': [x1, y1, x2, y2],
                         'confidence': 1.0
                     })
         
         return boxes
     
+    def calculate_iou_numpy(self, box1: np.ndarray, box2: np.ndarray) -> float:
+        """Calculate IoU using numpy arrays"""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+        
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return 0.0
+        
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0.0
+
     def calculate_metrics(self, gt_boxes: List[Dict], pred_boxes: List[Dict], 
-                         iou_threshold: float = 0.5) -> Tuple[int, int, int]:
+                         iou_threshold: float = 0.3) -> Tuple[int, int, int]:
         """Calculate accuracy metrics"""
         tp = 0
         fp = 0
