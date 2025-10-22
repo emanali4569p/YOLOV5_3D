@@ -143,8 +143,35 @@ class KITTIDataset(Dataset):
                     
                     targets = torch.stack(new_targets) if new_targets else torch.zeros((0, 16))
                 except:
-                    # If augmentation fails, use original data
-                    pass
+                    # If augmentation fails, apply basic transform to ensure tensor conversion
+                    try:
+                        transformed = self.transform(image=image, bboxes=[], class_labels=[])
+                        image = transformed['image']
+                    except:
+                        # Final fallback: manual tensor conversion
+                        import torchvision.transforms as transforms
+                        transform = transforms.Compose([
+                            transforms.ToPILImage(),
+                            transforms.Resize((self.img_size, self.img_size)),
+                            transforms.ToTensor(),
+                            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                        ])
+                        image = transform(image)
+        else:
+            # Apply basic transform when no targets or no augmentation
+            try:
+                transformed = self.transform(image=image, bboxes=[], class_labels=[])
+                image = transformed['image']
+            except:
+                # Fallback: manual tensor conversion
+                import torchvision.transforms as transforms
+                transform = transforms.Compose([
+                    transforms.ToPILImage(),
+                    transforms.Resize((self.img_size, self.img_size)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+                image = transform(image)
         
         return image, targets
     
@@ -203,6 +230,8 @@ class KITTIDataset(Dataset):
     def collate_fn(self, batch):
         """Custom collate function for batching"""
         images, targets = zip(*batch)
+        # Ensure all images are tensors
+        images = [img if isinstance(img, torch.Tensor) else torch.from_numpy(img).permute(2, 0, 1).float() for img in images]
         images = torch.stack(images)
         return images, targets
 
