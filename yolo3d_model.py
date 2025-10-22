@@ -149,76 +149,68 @@ class Detect3D(nn.Module):
         }
 
 class YOLOv5_3D(nn.Module):
-    """YOLOv5 model for 3D object detection with improved multi-scale architecture"""
+    """YOLOv5 model for 3D object detection - Memory Optimized"""
     def __init__(self, nc=80, anchors=()):
         super(YOLOv5_3D, self).__init__()
         
-        # Enhanced backbone with multi-scale feature extraction
-        self.conv1 = Conv(3, 64, 3)
-        self.conv2 = Conv(64, 128, 3, 2)
-        self.c3_1 = C3(128, 128, 3)
+        # Lightweight backbone with reduced channels
+        self.conv1 = Conv(3, 32, 3)      # Reduced from 64
+        self.conv2 = Conv(32, 64, 3, 2)   # Reduced from 128
+        self.c3_1 = C3(64, 64, 1)        # Reduced layers
         
-        self.conv3 = Conv(128, 256, 3, 2)
-        self.c3_2 = C3(256, 256, 9)
+        self.conv3 = Conv(64, 128, 3, 2)  # Reduced from 256
+        self.c3_2 = C3(128, 128, 2)      # Reduced layers
         
-        self.conv4 = Conv(256, 512, 3, 2)
-        self.c3_3 = C3(512, 512, 9)
+        self.conv4 = Conv(128, 256, 3, 2)  # Reduced from 512
+        self.c3_3 = C3(256, 256, 2)      # Reduced layers
         
-        self.conv5 = Conv(512, 1024, 3, 2)
-        self.c3_4 = C3(1024, 1024, 3)
-        self.sppf = SPPF(1024, 1024, 5)
+        self.conv5 = Conv(256, 512, 3, 2) # Reduced from 1024
+        self.c3_4 = C3(512, 512, 1)      # Reduced layers
+        self.sppf = SPPF(512, 512, 5)    # Reduced channels
         
-        # Enhanced Feature Pyramid Network with proper multi-scale features
-        self.neck_conv1 = Conv(1024, 512, 1, 1)  # P5 -> 512 channels
+        # Lightweight Feature Pyramid Network
+        self.neck_conv1 = Conv(512, 256, 1, 1)  # P5 -> 256 channels
         self.neck_upsample1 = nn.Upsample(None, 2, 'nearest')
         
-        self.neck_conv2 = Conv(512, 256, 1, 1)   # P4 -> 256 channels
+        self.neck_conv2 = Conv(256, 128, 1, 1)   # P4 -> 128 channels
         self.neck_upsample2 = nn.Upsample(None, 2, 'nearest')
         
-        self.neck_conv3 = Conv(256, 128, 1, 1)   # P3 -> 128 channels
+        self.neck_conv3 = Conv(128, 64, 1, 1)    # P3 -> 64 channels
         
-        # Additional convolutions for feature refinement
-        self.neck_conv4 = Conv(512 + 256, 512, 3, 1)  # Fuse P5 + P4
-        self.neck_conv5 = Conv(256 + 128, 256, 3, 1)  # Fuse P4 + P3
-        
-        # Detection head with proper multi-scale channel dimensions
-        self.detect = Detect3D(nc=nc, anchors=anchors, ch=[128, 256, 512])
+        # Detection head with reduced channel dimensions
+        self.detect = Detect3D(nc=nc, anchors=anchors, ch=[64, 128, 256])
 
     def forward(self, x):
-        """Enhanced forward pass with true multi-scale features"""
-        # Backbone with intermediate feature extraction
-        x1 = self.conv1(x)      # 64 channels
-        x2 = self.conv2(x1)     # 128 channels  
-        x3 = self.c3_1(x2)      # 128 channels
+        """Memory-optimized forward pass"""
+        # Backbone with reduced memory usage
+        x1 = self.conv1(x)      # 32 channels
+        x2 = self.conv2(x1)     # 64 channels  
+        x3 = self.c3_1(x2)      # 64 channels
         
-        x4 = self.conv3(x3)     # 256 channels
-        x5 = self.c3_2(x4)      # 256 channels
+        x4 = self.conv3(x3)     # 128 channels
+        x5 = self.c3_2(x4)      # 128 channels
         
-        x6 = self.conv4(x5)     # 512 channels
-        x7 = self.c3_3(x6)      # 512 channels
+        x6 = self.conv4(x5)     # 256 channels
+        x7 = self.c3_3(x6)      # 256 channels
         
-        x8 = self.conv5(x7)     # 1024 channels
-        x9 = self.c3_4(x8)      # 1024 channels
-        x10 = self.sppf(x9)     # 1024 channels
+        x8 = self.conv5(x7)     # 512 channels
+        x9 = self.c3_4(x8)      # 512 channels
+        x10 = self.sppf(x9)     # 512 channels
         
-        # Enhanced Feature Pyramid Network with true multi-scale features
-        # P5 (large objects) - 512 channels
+        # Lightweight Feature Pyramid Network
+        # P5 (large objects) - 256 channels
         p5 = self.neck_conv1(x10)
         
-        # P4 (medium objects) - 256 channels  
+        # P4 (medium objects) - 128 channels  
         p4_up = self.neck_upsample1(p5)
-        p4 = self.neck_conv2(p4_up + x7)  # Fuse with backbone feature
+        p4 = self.neck_conv2(p4_up)
         
-        # P3 (small objects) - 128 channels
+        # P3 (small objects) - 64 channels
         p3_up = self.neck_upsample2(p4)
-        p3 = self.neck_conv3(p3_up + x5)  # Fuse with backbone feature
+        p3 = self.neck_conv3(p3_up)
         
-        # Feature refinement
-        p4_refined = self.neck_conv4(torch.cat([p5, p4], dim=1))  # 512 channels
-        p3_refined = self.neck_conv5(torch.cat([p4, p3], dim=1))  # 256 channels
-        
-        # Final multi-scale features: P3 (128), P4 (256), P5 (512)
-        return self.detect([p3, p4_refined, p4_refined])
+        # Final multi-scale features: P3 (64), P4 (128), P5 (256)
+        return self.detect([p3, p4, p5])
 
 class Loss3D(nn.Module):
     """Enhanced 3D Detection loss function with scientific components"""

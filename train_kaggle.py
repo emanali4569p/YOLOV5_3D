@@ -15,6 +15,7 @@ import warnings
 
 # Suppress CUDA warnings that appear on Kaggle
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'  # Memory optimization
 warnings.filterwarnings('ignore')
 
 from kitti_dataset import create_dataloader
@@ -108,7 +109,7 @@ class Trainer3D:
         )
     
     def train_epoch(self, epoch):
-        """Train for one epoch"""
+        """Train for one epoch with memory optimization"""
         self.model.train()
         total_loss = 0
         num_batches = 0
@@ -117,7 +118,7 @@ class Trainer3D:
         
         for batch_idx, (images, targets) in enumerate(pbar):
             try:
-                images = images.to(self.device)
+                images = images.to(self.device, non_blocking=True)
                 
                 # Forward pass
                 self.optimizer.zero_grad()
@@ -135,6 +136,10 @@ class Trainer3D:
                 
                 self.optimizer.step()
                 
+                # Clear cache periodically to free memory
+                if batch_idx % 10 == 0:
+                    torch.cuda.empty_cache()
+                
                 # Update metrics
                 total_loss += loss.item()
                 num_batches += 1
@@ -142,7 +147,8 @@ class Trainer3D:
                 # Update progress bar
                 pbar.set_postfix({
                     'Loss': f'{loss.item():.4f}',
-                    'Avg Loss': f'{total_loss/num_batches:.4f}'
+                    'Avg Loss': f'{total_loss/num_batches:.4f}',
+                    'GPU Mem': f'{torch.cuda.memory_allocated()/1e9:.1f}GB'
                 })
                 
                 # Log to TensorBoard
@@ -151,6 +157,7 @@ class Trainer3D:
                                          epoch * len(self.train_dataset) + batch_idx)
             except Exception as e:
                 print(f"Error in batch {batch_idx}: {e}")
+                torch.cuda.empty_cache()  # Clear cache on error
                 continue
         
         return total_loss / max(num_batches, 1)
@@ -266,12 +273,12 @@ def create_kaggle_config():
     """Create Kaggle-optimized training configuration"""
     return {
         'data_dir': '/kaggle/input/kitti-dataset/Data',  # Adjust path for Kaggle
-        'img_size': 640,
-        'batch_size': 4,  # Reduced for Kaggle memory constraints
-        'epochs': 100,
+        'img_size': 416,  # Reduced from 640 to save memory
+        'batch_size': 2,  # Further reduced for memory constraints
+        'epochs': 20,  # Reduced as requested
         'learning_rate': 0.001,
         'weight_decay': 1e-4,
-        'num_workers': 2,  # Reduced for Kaggle
+        'num_workers': 1,  # Further reduced for Kaggle
         'resume': None
     }
 

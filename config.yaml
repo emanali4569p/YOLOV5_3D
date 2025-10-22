@@ -2,12 +2,12 @@
 
 # البيانات
 data_dir: "Data"
-img_size: 640
-batch_size: 8
-num_workers: 4
+img_size: 416  # Reduced from 640 to save memory
+batch_size: 2  # Reduced from 8 to save memory
+num_workers: 2  # Reduced from 4 to save memory
 
 # التدريب
-epochs: 100
+epochs: 20  # Reduced from 100 as requested
 learning_rate: 0.001
 weight_decay: 0.0005
 grad_clip: 10.0

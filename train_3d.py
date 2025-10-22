@@ -240,9 +240,9 @@ def create_config():
     """Create training configuration"""
     return {
         'data_dir': 'Data',
-        'img_size': 640,
-        'batch_size': 8,
-        'epochs': 5,  # Reduced for testing
+        'img_size': 416,  # Reduced to save memory
+        'batch_size': 2,  # Reduced to save memory
+        'epochs': 20,  # As requested
         'learning_rate': 0.001,
         'weight_decay': 1e-4,
         'resume': None
