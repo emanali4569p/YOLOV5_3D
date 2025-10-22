@@ -8,9 +8,9 @@ num_workers: 2  # Reduced from 4 to save memory
 
 # التدريب
 epochs: 20  # Reduced from 100 as requested
-learning_rate: 0.001
+learning_rate: 0.01  # Increased for better learning
 weight_decay: 0.0005
-grad_clip: 10.0
+grad_clip: 1.0  # Reduced for better gradient flow
 
 # الحفظ والتسجيل
 log_dir: "runs/3d_detection"

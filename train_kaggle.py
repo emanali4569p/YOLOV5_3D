@@ -97,15 +97,19 @@ class Trainer3D:
     
     def setup_optimizer(self):
         """Setup optimizer and scheduler"""
-        self.optimizer = optim.Adam(
+        # Use SGD for better learning with momentum
+        self.optimizer = optim.SGD(
             self.model.parameters(),
             lr=self.config['learning_rate'],
+            momentum=0.9,
             weight_decay=self.config.get('weight_decay', 1e-4)
         )
         
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        # Use StepLR for better learning curve
+        self.scheduler = optim.lr_scheduler.StepLR(
             self.optimizer,
-            T_max=self.config['epochs']
+            step_size=5,
+            gamma=0.5
         )
     
     def train_epoch(self, epoch):
@@ -276,7 +280,7 @@ def create_kaggle_config():
         'img_size': 416,  # Reduced from 640 to save memory
         'batch_size': 2,  # Further reduced for memory constraints
         'epochs': 20,  # Reduced as requested
-        'learning_rate': 0.001,
+        'learning_rate': 0.01,  # Increased for better learning
         'weight_decay': 1e-4,
         'num_workers': 1,  # Further reduced for Kaggle
         'resume': None
