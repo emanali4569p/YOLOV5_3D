@@ -102,14 +102,18 @@ class Trainer3D:
             self.model.parameters(),
             lr=self.config['learning_rate'],
             momentum=0.9,
-            weight_decay=self.config.get('weight_decay', 1e-4)
+            weight_decay=self.config.get('weight_decay', 1e-4),
+            nesterov=True  # Nesterov momentum for better convergence
         )
         
-        # Use StepLR for better learning curve
-        self.scheduler = optim.lr_scheduler.StepLR(
+        # Use ReduceLROnPlateau for adaptive learning rate
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
-            step_size=5,
-            gamma=0.5
+            mode='min',
+            factor=0.5,
+            patience=5,
+            verbose=True,
+            min_lr=1e-6
         )
     
     def train_epoch(self, epoch):
@@ -135,8 +139,8 @@ class Trainer3D:
                 # Backward pass
                 loss.backward()
                 
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                # Gradient clipping - more aggressive for better stability
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
                 
                 self.optimizer.step()
                 
@@ -248,8 +252,8 @@ class Trainer3D:
             # Validate
             val_loss = self.validate(epoch)
             
-            # Update scheduler
-            self.scheduler.step()
+            # Update scheduler based on validation loss
+            self.scheduler.step(val_loss)
             
             # Log metrics
             print(f'Epoch {epoch+1}/{self.config["epochs"]}:')
@@ -264,8 +268,8 @@ class Trainer3D:
             
             self.save_checkpoint(epoch, val_loss, is_best)
             
-            # Early stopping
-            if epoch > 10 and val_loss > best_loss * 1.1:
+            # Early stopping with more patience
+            if epoch > 20 and val_loss > best_loss * 1.2:
                 print("Early stopping triggered")
                 break
         
@@ -279,8 +283,8 @@ def create_kaggle_config():
         'data_dir': '/kaggle/input/kitti-dataset/Data',  # Adjust path for Kaggle
         'img_size': 416,  # Reduced from 640 to save memory
         'batch_size': 2,  # Further reduced for memory constraints
-        'epochs': 20,  # Reduced as requested
-        'learning_rate': 0.01,  # Increased for better learning
+        'epochs': 100,  # Increased for better learning
+        'learning_rate': 0.005,  # Optimized learning rate
         'weight_decay': 1e-4,
         'num_workers': 1,  # Further reduced for Kaggle
         'resume': None

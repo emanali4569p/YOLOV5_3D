@@ -223,13 +223,13 @@ class Loss3D(nn.Module):
         self.smooth_l1 = nn.SmoothL1Loss()
         self.l1_loss = nn.L1Loss()
         
-        # Loss weights
-        self.lambda_obj = 1.0      # Objectness loss weight
-        self.lambda_bbox = 5.0     # Bbox loss weight  
-        self.lambda_cls = 1.0      # Classification loss weight
-        self.lambda_depth = 2.0    # Depth loss weight
-        self.lambda_dim = 1.0      # Dimension loss weight
-        self.lambda_rot = 1.0      # Rotation loss weight
+        # Loss weights - optimized for better learning
+        self.lambda_obj = 2.0      # Objectness loss weight (increased)
+        self.lambda_bbox = 10.0    # Bbox loss weight (increased)
+        self.lambda_cls = 2.0      # Classification loss weight (increased)
+        self.lambda_depth = 1.0    # Depth loss weight (decreased)
+        self.lambda_dim = 0.5      # Dimension loss weight (decreased)
+        self.lambda_rot = 0.5      # Rotation loss weight (decreased)
 
     def ciou_loss(self, pred_bbox, target_bbox):
         """Complete IoU Loss for better bbox regression"""
