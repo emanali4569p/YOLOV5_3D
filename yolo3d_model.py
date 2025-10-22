@@ -132,10 +132,13 @@ class Detect3D(nn.Module):
         rotation_outputs = []
         
         for i in range(self.nl):
-            x[i] = self.m[i](x[i])  # Detection
+            # Process 3D heads on input features before detection head
             depth_outputs.append(self.depth_head[i](x[i]))
             dimension_outputs.append(self.dimension_head[i](x[i]))
             rotation_outputs.append(self.rotation_head[i](x[i]))
+            
+            # Detection head
+            x[i] = self.m[i](x[i])
             z.append(x[i])
         
         return {
@@ -150,49 +153,64 @@ class YOLOv5_3D(nn.Module):
     def __init__(self, nc=80, anchors=()):
         super(YOLOv5_3D, self).__init__()
         
-        # Backbone
-        self.backbone = nn.Sequential(
-            Focus(3, 32, 3),
-            Conv(32, 64, 3, 2),
-            C3(64, 64, 3),
-            Conv(64, 128, 3, 2),
-            C3(128, 128, 9),
-            Conv(128, 256, 3, 2),
-            C3(256, 256, 9),
-            Conv(256, 512, 3, 2),
-            C3(512, 512, 3),
-            SPPF(512, 512, 5)
-        )
+        # Backbone layers
+        self.conv1 = Conv(3, 32, 3)
+        self.conv2 = Conv(32, 64, 3, 2)
+        self.c3_1 = C3(64, 64, 3)
+        self.conv3 = Conv(64, 128, 3, 2)
+        self.c3_2 = C3(128, 128, 9)
+        self.conv4 = Conv(128, 256, 3, 2)
+        self.c3_3 = C3(256, 256, 9)
+        self.conv5 = Conv(256, 512, 3, 2)
+        self.c3_4 = C3(512, 512, 3)
+        self.sppf = SPPF(512, 512, 5)
         
         # Neck (Feature Pyramid Network)
-        self.neck = nn.Sequential(
-            Conv(512, 256, 1, 1),
-            nn.Upsample(None, 2, 'nearest'),
-            Conv(256, 256, 3, 1),
-            Conv(256, 128, 1, 1),
-            nn.Upsample(None, 2, 'nearest'),
-            Conv(128, 128, 3, 1),
-            Conv(128, 64, 1, 1),
-            nn.Upsample(None, 2, 'nearest'),
-            Conv(64, 64, 3, 1)
-        )
+        self.neck_conv1 = Conv(512, 256, 1, 1)
+        self.neck_upsample1 = nn.Upsample(None, 2, 'nearest')
+        self.neck_conv2 = Conv(256, 256, 3, 1)
+        self.neck_conv3 = Conv(256, 128, 1, 1)
+        self.neck_upsample2 = nn.Upsample(None, 2, 'nearest')
+        self.neck_conv4 = Conv(128, 128, 3, 1)
+        self.neck_conv5 = Conv(128, 64, 1, 1)
+        self.neck_upsample3 = nn.Upsample(None, 2, 'nearest')
+        self.neck_conv6 = Conv(64, 64, 3, 1)
         
-        # Detection head
-        self.detect = Detect3D(nc=nc, anchors=anchors, ch=[512, 512, 512])
+        # Detection head - using actual feature dimensions
+        self.detect = Detect3D(nc=nc, anchors=anchors, ch=[64, 128, 512])
 
     def forward(self, x):
         """Forward pass"""
         # Backbone
-        backbone_out = self.backbone(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.c3_1(x)
+        x = self.conv3(x)
+        x = self.c3_2(x)
+        x = self.conv4(x)
+        x = self.c3_3(x)
+        x = self.conv5(x)
+        x = self.c3_4(x)
+        x = self.sppf(x)
+        
+        # Store intermediate features
+        p5 = x  # 512 channels
         
         # Neck
-        neck_out = self.neck(backbone_out)
+        x = self.neck_conv1(x)  # 256 channels
+        x = self.neck_upsample1(x)
+        x = self.neck_conv2(x)
+        x = self.neck_conv3(x)  # 128 channels
+        p4 = x
         
-        # Detection
-        p3 = backbone_out * 0.6
-        p4 = backbone_out * 0.8
-        p5 = backbone_out * 1.0
+        x = self.neck_upsample2(x)
+        x = self.neck_conv4(x)
+        x = self.neck_conv5(x)  # 64 channels
+        x = self.neck_upsample3(x)
+        x = self.neck_conv6(x)
+        p3 = x  # 64 channels
         
+        # Detection with proper feature dimensions
         return self.detect([p3, p4, p5])
 
 class Loss3D(nn.Module):

@@ -25,10 +25,22 @@ Upload all the required files to your Kaggle notebook or dataset.
 !pip install -r requirements.txt
 ```
 
-### 3. Test the Dataset (Recommended)
-Before training, test that the dataset works correctly:
+### 3. Test the Pipeline (Recommended)
+Before training, test that everything works correctly:
+
+**Test dataset only:**
 ```python
 !python test_dataset.py
+```
+
+**Test model architecture:**
+```python
+!python test_model.py
+```
+
+**Test complete pipeline:**
+```python
+!python test_full_pipeline.py
 ```
 
 ### 4. Run Training
@@ -48,7 +60,12 @@ Before training, test that the dataset works correctly:
 - **Solution**: Enhanced collate function to ensure all images are tensors
 - **Location**: `kitti_dataset.py` lines 230-236
 
-### 3. Kaggle-Specific Optimizations
+### 3. Model Architecture Fix
+- **Problem**: Channel mismatch in 3D detection heads (depth, dimension, rotation)
+- **Solution**: Fixed the order of operations in Detect3D forward pass and corrected feature dimensions
+- **Location**: `yolo3d_model.py` lines 134-149 and 180
+
+### 4. Kaggle-Specific Optimizations
 - **Reduced batch size** for memory constraints
 - **Reduced num_workers** to avoid multiprocessing issues
 - **Added error handling** for robust training
